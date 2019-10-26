@@ -1,0 +1,73 @@
+#! /bin/bash
+#   Restart script for Klipper service and reconnect OctoPrint port
+#   Coded by Richard B. Jan 2019, last modified Oct 2019
+
+# The Octoprint API key is nessessary for CURL to reconnect the printer after Klippert service is restarted.
+apiKey="ABCDEF1234567890ABCDEF1234567890"
+
+# Where can the script access the printer, default for klipper is /tmp/printer
+printerPath=/tmp/printer
+
+
+# Ensure that an Octoprint API key has been provided
+if [ "$apiKey" = "ABCDEF1234567890ABCDEF1234567890" ]; then
+    echo -e '\n\t!!!\tAPI key is not provided, this must be configured for your setup by editing the value in this script!\n'
+    while :
+    do
+        echo ""
+        read -n1 -r -p "Would you like to edit this script with nano now?  y/n:   " editFileAnswer
+        if [ "$editFileAnswer" = 'y' ]; then
+            nano $0
+            echo -e '\n... restarting '$0' script'
+            sleep 1
+            $0
+            exit 0
+        elif [ "$editFileAnswer" = 'n' ]; then
+            echo -e '\n\tThis script is not fully configured and will be unable to communicate with Octoprint\n'
+            hasApiKey='n'
+            break;
+        fi
+    done
+else
+    hasApiKey='y'
+fi
+
+# Confirm user is willing and ready to restart
+echo ' '
+read -n1 -r -p "     Are you sure you want to restart the Klipper service?  y/n:   " serviceRestartAnswer
+if [ "$serviceRestartAnswer" = 'y' ]; then
+    echo ''
+elif [ "$serviceRestartAnswer" = 'n' ]; then
+    echo -e '\n'
+    exit 0
+else
+    echo -e '\n\tInvalid response, must be y or n. Exiting...\n\n'
+    exit 2
+fi
+
+# Restart Klipper service and send firmware_restart
+echo -e '\n\t Checking current status of Klipper service'
+service klipper status|grep CGroup -A1
+service klipper status|grep Active
+echo -e '\n\tRestarting Klipper service ...'
+sudo service klipper restart
+echo -e '\t\tDone.\n'
+service klipper status|grep CGroup -A1
+service klipper status|grep Active
+echo -e '\n'
+echo -e '\tRestarting Klipper firmware ...'
+sleep 10
+# Reconnect Octoprint with Klipper port then restart the firmware (microcontroller)
+if [ $hasApiKey = 'y' ]; then
+    curl -s http://octopi.local/api/connection -d '{"command":"connect"}' -H 'Content-Type: application/json' -H 'X-Api-Key: '$apiKey
+fi
+echo firmware_restart > $printerPath
+
+# Wait for reconnect to complete, close connection and gracefully exit
+sleep 5
+echo status > $printerPath
+if [ $hasApiKey = 'y' ]; then
+    curl -X POST http://octopi.local/api/logout -H 'Content-Type: application/json' -H 'X-Api-Key: '$apiKey
+fi
+echo -e '\t\tDone, OctoPrint has been reconnected.\n\n'
+exit 0
