@@ -1,0 +1,134 @@
+#! /bin/bash
+#   Script to make and flash Klipper using ./.config to the provided usb by-id
+#   This file must be under the Klipper parent folder, by default: ~/klipper/
+#   Coded by Richard B. Jan 2019, last modified Oct 2019
+
+
+################
+# Script configuration:
+
+# Location using /dev/serial/by-id/ direct path
+# This can be found using 'ls /dev/serial/by-id', if multiple devices are listed run this prior and after connecting the device
+usbToFlash=/dev/serial/by-id/
+
+# The Octoprint API key is nessessary for CURL to reconnect the printer after Klippert service is restarted.
+apiKey="ABCDEF1234567890ABCDEF1234567890"
+
+################
+
+
+# Begin message and information before script executes
+echo -e '\n\n\t\tThis script will make and flash Klipper using the saved settings from ./.config'
+echo -e '\t\tto the configured Arduino Mega2560 listed below. Prior to execution the Klipper'
+echo -e '\t\tservice will be stopped, and after the upload is finished it will be restarted.'
+echo -e '\n\tArduino: '$usbToFlash
+echo -e '\n    Sudo access is required as the klipper service must be stopped and started with privlidges.\n'
+sudo echo ''
+
+# Check if a device has been provided to flash
+if [ $usbToFlash = /dev/serial/by-id/ ]; then
+    echo -e '\n\t!!!\tA device to flash has not be configured in the script, listing /dev/serial/by-id/ below:\n'
+    ls /dev/serial/by-id
+    while :
+    do
+        echo -e '\n\n'
+        read -n1 -r -p "Would you like to edit this script with nano now?  y/n/q:   " editFileAnswer
+        if [ "$editFileAnswer" = 'y' ]; then
+            nano $0
+            echo -e '\n... restarting '$0' script'
+            sleep 1
+            $0
+            exit 0
+        else
+            echo -e '\n..exiting..'
+            exit 1
+        fi
+    done
+else
+    echo -e '\n'$usbToFlash
+    read -n1 -r -p "Is this the correct device?  y/n/q:   " correctDevAnswer
+    if [ "$correctDevAnswer" != 'y' ]; then
+        echo -e '\n..exiting..'
+        exit 1
+    fi
+fi
+
+# Ensure that an Octoprint API key has been provided
+if [ "$apiKey" = "ABCDEF1234567890ABCDEF1234567890" ]; then
+    echo -e '\n\t!!!\tAPI key is not provided, this must be configured for your setup by editing the value in this script!'
+    echo -e '\t\t\tFailure to do so only means that OCtoprint will not be automatically reconnected after service restart.\n'
+    while :
+    do
+        echo ""
+        read -n1 -r -p "Would you like to edit this script with nano now?  y/n/q:   " editFileAnswer
+        if [ "$editFileAnswer" = 'y' ]; then
+            nano $0
+            echo -e '\n... restarting '$0' script'
+            sleep 1
+            $0
+            exit 0
+        elif [ "$editFileAnswer" = 'n' ]; then
+            echo -e '\n\tThis script is not fully configured and will be unable to communicate with Octoprint\n'
+            hasApiKey='n'
+            break;
+        elif [ "$editFileAnswer" = 'q' ]; then
+            echo -e '\n..exiting..'
+            exit 0
+        fi
+    done
+else
+    hasApiKey='y'
+fi
+
+# Ask if the user would like to edit the config using menuconfig
+read -n1 -r -p "Would you like to edit the config (menuconfig) Y/N/Q:  " key
+case $key in
+    [Yy]* )
+        echo -e '\n\tPlease wait, running 'make menuconfig' ';
+        make menuconfig;;
+    [Nn]* )
+        echo -e '\n\tSkipping menuconfig...\n';;
+    [Qq]* )
+        echo -e '\n..exiting..'
+        exit 0;;
+    * )
+        echo -e '\nInvalid response, exiting...\n\n';
+        exit 2;;
+esac
+
+# Ensure the user is ready
+read -n1 -r -p "Press space or enter to continue...  " key
+if [ "$key" = '' ]; then
+    echo '...'
+    sudo service klipper stop
+  else
+    echo -e '\nInvalid response, exiting...\n\n'
+    exit 2
+fi
+
+# Run make command
+echo -e '\n\t\tMaking the files using current config'
+make
+
+# Flash firmware to device
+echo -e '\n\n\t\tFlashing to Arduino Mega2560 & Ramps 1.6+'
+make flash FLASH_DEVICE=$usbToFlash
+
+# Restart Klipper service
+echo -e '\n\t\tDone, service is restarting..'
+sudo service klipper start
+echo -e '___________________________________\n'
+sudo service klipper status | cat
+echo -e '___________________________________\n\n'
+
+# Restart the firmware on the Arduino
+echo -e '\tRestarting Klipper firmware ...'
+sleep 10
+curl -s http://octopi.local/api/connection -d '{"command":"connect"}' -H 'Content-Type: application/json' -H 'X-Api-Key: '$apiKey
+echo firmware_restart > /tmp/printer
+echo -e '\t\tDone.\n\n'
+sleep 2
+echo status > /tmp/printer
+
+# Done
+exit 0
